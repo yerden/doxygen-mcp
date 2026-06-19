@@ -1,0 +1,23 @@
+PROJECT_NAME           = "doxygen-mcp-project"
+PROJECT_NUMBER         =
+PROJECT_BRIEF          =
+
+OUTPUT_DIRECTORY       = $(DOXYGEN_OUTPUT_DIR)
+
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_XML           = YES
+XML_PROGRAMLISTING     = NO
+
+INPUT                  = $(DOXYGEN_INPUT)
+RECURSIVE              = YES
+
+STRIP_FROM_PATH        = $(DOXYGEN_STRIP_FROM_PATH)
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_ANON_NSPACES   = YES
+
+QUIET                  = YES
+WARNINGS               = YES
