@@ -16,6 +16,7 @@ COPY --from=build /out/indexer /usr/local/bin/indexer
 COPY --from=build /out/server  /usr/local/bin/server
 ENV DB_PATH=/data/index.db
 ENV XML_DIR=/xml
+EXPOSE 9123
 VOLUME ["/xml", "/data"]
 COPY docker-entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

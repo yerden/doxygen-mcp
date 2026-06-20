@@ -79,6 +79,7 @@ func indexCompound(tx *sql.Tx, xmlPath string, fileCache map[string]int64) error
 }
 
 func getOrCreateFile(tx *sql.Tx, path string, cache map[string]int64) (int64, error) {
+	path = filepath.Clean(path)
 	if id, ok := cache[path]; ok {
 		return id, nil
 	}

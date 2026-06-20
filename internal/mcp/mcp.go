@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -16,23 +17,33 @@ func NewServer(database *db.DB) *server.MCPServer {
 	)
 
 	s.AddTool(mcp.NewTool("search",
-		mcp.WithDescription("Full-text search over indexed symbols"),
+		mcp.WithDescription("Full-text search over C symbols indexed from Doxygen XML. "+
+			"Searches symbol names, signatures, and descriptions. "+
+			"Symbols are snake_case; the index splits on underscores, so 'init' matches 'buf_init'. "+
+			"Supports FTS5 syntax: prefix (init*), boolean (alloc AND free), phrase (\"open file\"). "+
+			"Returns functions, macros, typedefs, structs, enums, and variables with file and line."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("FTS5 search query")),
-		mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
+		mcp.WithNumber("limit", mcp.Description("Maximum number of results to return (default 20)")),
 	), searchHandler(database))
 
 	s.AddTool(mcp.NewTool("get_symbol",
-		mcp.WithDescription("Exact symbol name lookup with parameters"),
-		mcp.WithString("name", mcp.Required(), mcp.Description("Symbol name")),
+		mcp.WithDescription("Look up a C symbol by exact name. "+
+			"Returns kind, file location, return type, full signature, description, and parameter list."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Exact symbol name, e.g. buf_init")),
 	), getSymbolHandler(database))
 
 	s.AddTool(mcp.NewTool("list_files",
-		mcp.WithDescription("List all indexed source files"),
+		mcp.WithDescription("List all source files in the index as project-relative paths. "+
+			"Use these paths with symbols_in_file."),
 	), listFilesHandler(database))
 
 	s.AddTool(mcp.NewTool("symbols_in_file",
-		mcp.WithDescription("List all symbols defined in a file"),
-		mcp.WithString("file", mcp.Required(), mcp.Description("Relative file path")),
+		mcp.WithDescription("List all symbols defined in a source file. "+
+			"Use list_files to get valid paths. "+
+			"Paths are relative to the project root (e.g. src/buf.c), not absolute. "+
+			"Leading ./ is accepted."),
+		mcp.WithString("file", mcp.Required(),
+			mcp.Description("Project-relative path to the source file, e.g. src/buf.c")),
 	), symbolsInFileHandler(database))
 
 	return s
@@ -150,7 +161,10 @@ func listFilesHandler(database *db.DB) server.ToolHandlerFunc {
 
 func symbolsInFileHandler(database *db.DB) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		file := req.GetString("file", "")
+		file := filepath.Clean(req.GetString("file", ""))
+		if filepath.IsAbs(file) {
+			return mcp.NewToolResultError("file path must be relative, got absolute path: " + file), nil
+		}
 		rows, err := database.Query("symbols_in_file", file)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("error: %v", err)), nil
