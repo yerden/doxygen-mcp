@@ -10,14 +10,14 @@ C source files
      ▼  doxygen
 Doxygen XML  (xml/*.xml)
      │
-     ▼  doxygen-mcp index --xml <dir> --db <path>
-SQLite FTS5 database
+     ▼  doxygen-mcp --xml <dir> [--db <path>] [--http <addr>]
+SQLite FTS5 database (in-memory by default; --db persists to disk)
      │
-     ▼  doxygen-mcp serve --db <path> [--http <addr>]
+     ▼
 MCP client (Claude Desktop, claude CLI, opencode, …)
 ```
 
-The indexer parses Doxygen XML output and stores symbols (functions, macros, typedefs, structs, enums, variables) in a full-text-searchable SQLite database. The server exposes four MCP tools over stdio or HTTP.
+The binary indexes Doxygen XML and serves MCP in a single process. By default the index lives in RAM and is rebuilt on every start. Pass `--db <path>` to persist it to a SQLite file (still re-indexed on each start). Symbols (functions, macros, typedefs, structs, enums, variables) are stored full-text-searchable. Four MCP tools are exposed over stdio or HTTP.
 
 ## MCP Tools
 
@@ -32,7 +32,6 @@ The indexer parses Doxygen XML output and stores symbols (functions, macros, typ
 
 - Go 1.26+
 - Doxygen (to generate XML input; not required to run the server)
-- Docker (optional)
 
 ## Quick start
 
@@ -48,7 +47,7 @@ doxygen Doxyfile
 # XML appears in /tmp/doxygen-out/xml/
 ```
 
-`DOXYGEN_STRIP_FROM_PATH` is important: it makes the XML contain project-relative paths (`src/foo.c`) rather than absolute host paths, so the database is valid regardless of where the source tree is checked out.
+`DOXYGEN_STRIP_FROM_PATH` is important: it makes the XML contain project-relative paths (`src/foo.c`) rather than absolute host paths.
 
 ### 2. Build
 
@@ -57,59 +56,25 @@ make build
 # produces ./doxygen-mcp
 ```
 
-### 3. Index
-
-```sh
-./doxygen-mcp index --xml /tmp/doxygen-out/xml --db index.db
-```
-
-### 4. Run the MCP server
+### 3. Run
 
 **HTTP transport** (recommended for Claude Desktop and most clients):
 
 ```sh
-./doxygen-mcp serve --db index.db --http :9123
+./doxygen-mcp --xml /tmp/doxygen-out/xml --http :9123
 ```
 
 **Stdio transport** (for Claude Desktop subprocess mode):
 
 ```sh
-./doxygen-mcp serve --db index.db
+./doxygen-mcp --xml /tmp/doxygen-out/xml
 ```
 
-## Docker
-
-The Docker image re-indexes on every start, then forwards all `docker run` arguments to `doxygen-mcp serve`. The default `CMD` is `--http :9123`.
+**Persist the index to disk** (optional; still rebuilt on each start):
 
 ```sh
-# Build
-docker build -t doxygen-mcp .
-
-# Run (mount pre-generated Doxygen XML and a persistent data volume)
-docker run --rm \
-  -v /path/to/doxygen/xml:/xml:ro \
-  -v /path/to/data:/data \
-  -p 9123:9123 \
-  doxygen-mcp
+./doxygen-mcp --xml /tmp/doxygen-out/xml --db index.db --http :9123
 ```
-
-Override the default args to change transport / port / db path:
-
-```sh
-docker run --rm -p 8080:8080 doxygen-mcp --http :8080            # custom HTTP port
-docker run --rm -i doxygen-mcp --db /data/index.db               # stdio mode
-```
-
-The entrypoint reads `--db` from the forwarded args (falling back to `$DB_PATH`) and uses the same value for both indexing and serving, so the two never disagree.
-
-Environment variables:
-
-| Variable | Default | Description |
-|---|---|---|
-| `XML_DIR` | `/xml` | Path to Doxygen XML directory inside the container |
-| `DB_PATH` | `/data/index.db` | SQLite database path inside the container (used when `--db` isn't passed) |
-
-The container does **not** run Doxygen. Mount pre-generated XML at `/xml`.
 
 ## Connecting MCP clients
 
@@ -139,7 +104,7 @@ claude mcp add --transport http doxygen http://localhost:9123/mcp
   "mcpServers": {
     "doxygen": {
       "command": "/path/to/doxygen-mcp",
-      "args": ["serve", "--db", "/path/to/index.db"]
+      "args": ["--xml", "/path/to/doxygen-out/xml"]
     }
   }
 }
@@ -148,9 +113,8 @@ claude mcp add --transport http doxygen http://localhost:9123/mcp
 ## Development
 
 ```sh
-make test           # go test ./...
-make docker-test    # build test stage and run tests inside Docker (includes Doxygen)
-make docker-build   # build the runtime Docker image
+make test    # go test ./...
+make build   # produces ./doxygen-mcp
 ```
 
 ## Project structure
@@ -158,24 +122,24 @@ make docker-build   # build the runtime Docker image
 ```
 doxygen-mcp/
 ├── cmd/
-│   └── doxygen-mcp/main.go   # Single binary: `index` and `serve` subcommands
+│   └── doxygen-mcp/main.go   # Single binary, single entry point
 ├── internal/
 │   ├── db/                   # SQLite open, schema migration, named query loader
 │   ├── indexer/              # XML walking and DB insertion
 │   └── mcp/                  # MCP tool definitions and handlers
 ├── testdata/
 │   └── sample-c/src/         # Minimal C project used in tests
-├── Doxyfile                  # Doxygen config for C projects (env-var driven)
-└── Dockerfile                # Multi-stage: build / test / runtime
+└── Doxyfile                  # Doxygen config for C projects (env-var driven)
 ```
 
 ## Design notes
 
 - **No CGo**: uses `modernc.org/sqlite`, a pure-Go SQLite port; binaries are fully static (`CGO_ENABLED=0`).
+- **In-memory by default**: the index lives in RAM unless `--db` is given. The whole symbol table for a typical C project is small enough that this is fine.
+- **Re-index on every start**: no incremental logic. Even with `--db`, the file is wiped and rebuilt — persistence is a convenience for external inspection (e.g. with the `sqlite3` CLI), not for skipping work.
 - **Single transaction for indexing**: avoids per-row auto-commit, which makes SQLite slow on large projects.
 - **Snake_case tokenization**: FTS5 is configured with `tokenize="unicode61 separators '_'"` so that searching for `init` matches `buf_init`, `module_init`, etc.
 - **SQL embedded in binary**: schema and queries live in `internal/db/sql/` and are baked in at compile time via `//go:embed`.
-- **Re-index on every container start**: no incremental logic; simple and correct.
 
 ## License
 

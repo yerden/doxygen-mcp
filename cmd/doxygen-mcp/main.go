@@ -13,68 +13,29 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		usage()
+	xmlDir := flag.String("xml", "", "Doxygen XML output directory (required)")
+	dbPath := flag.String("db", "", "SQLite database path; omit for in-memory")
+	httpAddr := flag.String("http", "", "HTTP listen address (e.g. :9123); omit for stdio mode")
+	flag.Parse()
+
+	if *xmlDir == "" {
+		fmt.Fprintln(os.Stderr, "usage: doxygen-mcp --xml <dir> [--db <path>] [--http <addr>]")
 		os.Exit(1)
 	}
-	switch os.Args[1] {
-	case "index":
-		runIndex(os.Args[2:])
-	case "serve":
-		runServe(os.Args[2:])
-	case "-h", "--help", "help":
-		usage()
-	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", os.Args[1])
-		usage()
-		os.Exit(1)
+
+	path := *dbPath
+	if path == "" {
+		path = ":memory:"
 	}
-}
-
-func usage() {
-	fmt.Fprintln(os.Stderr, `usage: doxygen-mcp <command> [flags]
-
-Commands:
-  index   Parse Doxygen XML and populate the SQLite database
-  serve   Run the MCP server (stdio or HTTP)
-
-Run 'doxygen-mcp <command> -h' for command flags.`)
-}
-
-func runIndex(args []string) {
-	fs := flag.NewFlagSet("index", flag.ExitOnError)
-	xmlDir := fs.String("xml", "", "Doxygen XML output directory")
-	dbPath := fs.String("db", "", "SQLite database path")
-	_ = fs.Parse(args)
-	if *xmlDir == "" || *dbPath == "" {
-		fmt.Fprintln(os.Stderr, "usage: doxygen-mcp index --xml <dir> --db <path>")
-		os.Exit(1)
-	}
-	database, err := dbpkg.Open(*dbPath)
+	database, err := dbpkg.Open(path)
 	if err != nil {
 		log.Fatalf("open db: %v", err)
 	}
 	defer database.Close()
+
 	if err := indexer.Run(*xmlDir, database); err != nil {
 		log.Fatalf("index: %v", err)
 	}
-	log.Println("indexing complete")
-}
-
-func runServe(args []string) {
-	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	dbPath := fs.String("db", "", "SQLite database path")
-	httpAddr := fs.String("http", "", "HTTP listen address (e.g. :8080); omit for stdio mode")
-	_ = fs.Parse(args)
-	if *dbPath == "" {
-		fmt.Fprintln(os.Stderr, "usage: doxygen-mcp serve --db <path> [--http <addr>]")
-		os.Exit(1)
-	}
-	database, err := dbpkg.Open(*dbPath)
-	if err != nil {
-		log.Fatalf("open db: %v", err)
-	}
-	defer database.Close()
 
 	s := mcppkg.NewServer(database)
 
@@ -87,10 +48,6 @@ func runServe(args []string) {
 		return
 	}
 
-	fi, err := os.Stdin.Stat()
-	if err != nil || (fi.Mode()&os.ModeCharDevice) != 0 {
-		log.Fatal("stdin is not connected — run with: docker run -i ... or add --http <addr>")
-	}
 	if err := server.ServeStdio(s); err != nil {
 		log.Fatalf("server: %v", err)
 	}

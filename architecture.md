@@ -24,7 +24,6 @@ doxygen-mcp/
 ├── testdata/
 │   └── sample-c/         # Minimal C project used in tests
 ├── Doxyfile              # Doxygen config for C projects
-├── Dockerfile
 ├── Makefile
 └── go.mod
 ```
@@ -209,45 +208,9 @@ MCP transport: stdio by default, HTTP if `--http` is supplied.
 
 ---
 
-### 5. Dockerfile
+### 5. Testing
 
-Multi-stage build. The container expects pre-generated Doxygen XML as a bind
-mount — it does not run `doxygen` itself.
-
-```
-Stage 1 (build): golang:1.26-alpine
-  - Build the doxygen-mcp binary
-
-Stage 2 (runtime): alpine
-  - Copy binary
-  - ENTRYPOINT: run `doxygen-mcp index` on mounted XML dir,
-    then exec `doxygen-mcp serve "$@"` (default CMD: --http :9123)
-
-Stage 3 (test): built on top of stage 1
-  - Run go test ./...
-```
-
-Typical invocation (e.g. from claude CLI MCP config):
-
-```
-docker run -i --rm \
-  -v /path/to/xml:/xml:ro \
-  -v /path/to/index.db:/data/index.db \
-  doxygen-mcp
-```
-
-Run tests:
-
-```
-docker build --target test -t doxygen-mcp-test .
-docker run --rm doxygen-mcp-test
-```
-
----
-
-### 6. Testing
-
-All tests run inside Docker (`make test` → `docker build --target test` + `docker run --rm`).
+`make test` runs `go test ./...` against the host toolchain.
 
 - `internal/db`: schema migration, query loading, basic CRUD
 - `internal/indexer`: parse sample Doxygen XML from `testdata/`
@@ -280,5 +243,5 @@ MCP Client (claude CLI, Claude Desktop, etc.)
 |---|---|
 | MCP library | `mark3labs/mcp-go` |
 | Re-indexing | Wipe and reindex on every start |
-| Docker / Doxygen | Container expects pre-generated XML; does not run `doxygen` |
-| Transport | stdio only |
+| Doxygen | Pre-generated XML expected; the binary does not run `doxygen` |
+| Transport | stdio or streamable HTTP |

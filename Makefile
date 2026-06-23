@@ -1,7 +1,5 @@
-.PHONY: build test docker-build docker-test clean
+.PHONY: build test clean
 
-IMAGE := doxygen-mcp
-TEST_IMAGE := doxygen-mcp-test
 BINARY := doxygen-mcp
 
 build:
@@ -9,13 +7,6 @@ build:
 
 test:
 	go test ./...
-
-docker-build:
-	docker build --target runtime -t $(IMAGE) .
-
-docker-test:
-	docker build --target test -t $(TEST_IMAGE) .
-	docker run --rm $(TEST_IMAGE)
 
 clean:
 	rm -f $(BINARY)
