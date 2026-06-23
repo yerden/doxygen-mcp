@@ -10,10 +10,10 @@ C source files
      ▼  doxygen
 Doxygen XML  (xml/*.xml)
      │
-     ▼  indexer --xml <dir> --db <path>
+     ▼  doxygen-mcp index --xml <dir> --db <path>
 SQLite FTS5 database
      │
-     ▼  server --db <path> [--http <addr>]
+     ▼  doxygen-mcp serve --db <path> [--http <addr>]
 MCP client (Claude Desktop, claude CLI, opencode, …)
 ```
 
@@ -54,13 +54,13 @@ doxygen Doxyfile
 
 ```sh
 make build
-# produces ./indexer and ./server
+# produces ./doxygen-mcp
 ```
 
 ### 3. Index
 
 ```sh
-./indexer --xml /tmp/doxygen-out/xml --db index.db
+./doxygen-mcp index --xml /tmp/doxygen-out/xml --db index.db
 ```
 
 ### 4. Run the MCP server
@@ -68,18 +68,18 @@ make build
 **HTTP transport** (recommended for Claude Desktop and most clients):
 
 ```sh
-./server --db index.db --http :9123
+./doxygen-mcp serve --db index.db --http :9123
 ```
 
 **Stdio transport** (for Claude Desktop subprocess mode):
 
 ```sh
-./server --db index.db
+./doxygen-mcp serve --db index.db
 ```
 
 ## Docker
 
-The Docker image handles indexing on every start, then runs the HTTP server on port 9123.
+The Docker image re-indexes on every start, then forwards all `docker run` arguments to `doxygen-mcp serve`. The default `CMD` is `--http :9123`.
 
 ```sh
 # Build
@@ -93,12 +93,21 @@ docker run --rm \
   doxygen-mcp
 ```
 
+Override the default args to change transport / port / db path:
+
+```sh
+docker run --rm -p 8080:8080 doxygen-mcp --http :8080            # custom HTTP port
+docker run --rm -i doxygen-mcp --db /data/index.db               # stdio mode
+```
+
+The entrypoint reads `--db` from the forwarded args (falling back to `$DB_PATH`) and uses the same value for both indexing and serving, so the two never disagree.
+
 Environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
 | `XML_DIR` | `/xml` | Path to Doxygen XML directory inside the container |
-| `DB_PATH` | `/data/index.db` | SQLite database path inside the container |
+| `DB_PATH` | `/data/index.db` | SQLite database path inside the container (used when `--db` isn't passed) |
 
 The container does **not** run Doxygen. Mount pre-generated XML at `/xml`.
 
@@ -129,8 +138,8 @@ claude mcp add --transport http doxygen http://localhost:9123/mcp
 {
   "mcpServers": {
     "doxygen": {
-      "command": "/path/to/server",
-      "args": ["--db", "/path/to/index.db"]
+      "command": "/path/to/doxygen-mcp",
+      "args": ["serve", "--db", "/path/to/index.db"]
     }
   }
 }
@@ -149,8 +158,7 @@ make docker-build   # build the runtime Docker image
 ```
 doxygen-mcp/
 ├── cmd/
-│   ├── indexer/main.go       # CLI: parse Doxygen XML → populate SQLite
-│   └── server/main.go        # MCP server binary (stdio + HTTP)
+│   └── doxygen-mcp/main.go   # Single binary: `index` and `serve` subcommands
 ├── internal/
 │   ├── db/                   # SQLite open, schema migration, named query loader
 │   ├── indexer/              # XML walking and DB insertion

@@ -7,8 +7,7 @@ An MCP server that indexes Doxygen-generated XML into a SQLite FTS5 database and
 ```
 doxygen-mcp/
 ├── cmd/
-│   ├── indexer/main.go       # CLI: parse Doxygen XML → populate SQLite
-│   └── server/main.go        # MCP server binary (stdio + HTTP)
+│   └── doxygen-mcp/main.go   # Single binary with `index` and `serve` subcommands
 ├── internal/
 │   ├── db/
 │   │   ├── db.go             # Open, schema migration, named query loader
@@ -44,10 +43,10 @@ C source files
      ▼  doxygen (Doxyfile)
 Doxygen XML  (xml/*.xml)
      │
-     ▼  cmd/indexer --xml <dir> --db <path>
+     ▼  doxygen-mcp index --xml <dir> --db <path>
 SQLite FTS5 database
      │
-     ▼  cmd/server --db <path> [--http <addr>]
+     ▼  doxygen-mcp serve --db <path> [--http <addr>]
 MCP client (Claude Desktop, claude CLI, opencode, …)
 ```
 
@@ -111,18 +110,16 @@ The FTS table is an external-content table (`content='symbols'`): it does not st
 
 **Quoting**: the tokenize option requires double quotes in `CREATE VIRTUAL TABLE`. Single quotes cause a parse error in SQLite's FTS5 directive parser.
 
-## cmd/indexer
+## cmd/doxygen-mcp
+
+Single binary with two subcommands. Dispatched on `os.Args[1]`; each subcommand uses its own `flag.FlagSet`.
 
 ```
-indexer --xml <doxygen-xml-dir> --db <sqlite-path>
+doxygen-mcp index --xml <doxygen-xml-dir> --db <sqlite-path>
+doxygen-mcp serve --db <sqlite-path> [--http <addr>]
 ```
 
-## cmd/server
-
-```
-server --db <sqlite-path> [--http <addr>]
-```
-
+`serve` transport modes:
 - Without `--http`: stdio transport. Detects non-pipe stdin (e.g. Docker without `-i`, or a terminal) and exits with a clear error.
 - With `--http`: streamable HTTP transport (MCP 2025-03-26 spec) via `server.NewStreamableHTTPServer`. Default endpoint path is `/mcp`.
 
@@ -148,9 +145,9 @@ Three stages:
 
 | Stage | Base | Purpose |
 |---|---|---|
-| `build` | `golang:1.26-alpine` | Compiles `indexer` and `server` binaries |
+| `build` | `golang:1.26-alpine` | Compiles the `doxygen-mcp` binary |
 | `test` | `build` + doxygen | Runs `go test -v ./...` |
-| `runtime` | `alpine:3.21` | Ships binaries + entrypoint; `runtime` is last so `docker build .` produces the runnable image |
+| `runtime` | `alpine:3.21` | Ships binary + entrypoint; `runtime` is last so `docker build .` produces the runnable image |
 
 The container does **not** run doxygen. It expects pre-generated XML mounted at `/xml`.
 
@@ -163,9 +160,19 @@ Port `9123` is exposed. `/xml` and `/data` are declared as volumes; without a `-
 ## docker-entrypoint.sh
 
 ```sh
-indexer --xml "${XML_DIR}" --db "${DB_PATH}"
-exec server --db "${DB_PATH}" --http :9123
+# parse --db from "$@" (falls back to $DB_PATH)
+doxygen-mcp index --xml "${XML_DIR}" --db "$db"
+exec doxygen-mcp serve --db "$db" "$@"
 ```
+
+Forwards all arguments to `serve`. The default `CMD` in the Dockerfile is `["--http", ":9123"]`, so `docker run doxygen-mcp` starts HTTP on :9123 unmodified. Users can override:
+
+```sh
+docker run doxygen-mcp --http :8080            # different HTTP port
+docker run -i doxygen-mcp --db /data/index.db  # stdio mode
+```
+
+The entrypoint extracts `--db` from the forwarded args (or falls back to `$DB_PATH`) and passes that same value to both `index` and `serve` — so the database the indexer writes is always the database the server reads.
 
 Re-indexes on every container start (full wipe + rebuild, no incremental logic), then execs the MCP server.
 
@@ -210,5 +217,5 @@ claude mcp add --transport http doxygen http://localhost:9123/mcp
 - **SQL files embedded in binary**: `//go:embed` bakes them in at compile time; schema and queries are editable files but need no runtime deployment.
 - **Named queries only**: no inline SQL strings at call sites; all queries referenced by snake_case key.
 - **Re-index on every start**: no mtime or incremental logic; simplicity over efficiency.
-- **HTTP transport on :9123**: the entrypoint hardcodes this port; `EXPOSE 9123` in Dockerfile documents it.
+- **HTTP transport on :9123 by default**: the Dockerfile `CMD` provides `--http :9123`; users can override on the `docker run` line.
 - **Stdio transport also supported**: pass `--http` to use HTTP, omit it for stdio (Claude Desktop subprocess mode).

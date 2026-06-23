@@ -2,9 +2,10 @@
 
 IMAGE := doxygen-mcp
 TEST_IMAGE := doxygen-mcp-test
+BINARY := doxygen-mcp
 
 build:
-	go build ./cmd/indexer ./cmd/server
+	go build ./cmd/doxygen-mcp
 
 test:
 	go test ./...
@@ -17,4 +18,4 @@ docker-test:
 	docker run --rm $(TEST_IMAGE)
 
 clean:
-	rm -f indexer server
+	rm -f $(BINARY)

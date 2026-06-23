@@ -196,19 +196,16 @@ Implements MCP tools. Uses `mark3labs/mcp-go`.
 | `list_files` | All indexed source files | — |
 | `symbols_in_file` | Symbols in a specific file | `file: string` |
 
-#### `cmd/indexer`
+#### `cmd/doxygen-mcp`
+
+Single binary with two subcommands:
 
 ```
-indexer --xml <doxygen-xml-dir> --db <sqlite-path>
+doxygen-mcp index --xml <doxygen-xml-dir> --db <sqlite-path>
+doxygen-mcp serve --db <sqlite-path> [--http <addr>]
 ```
 
-#### `cmd/server`
-
-```
-server --db <sqlite-path>
-```
-
-MCP transport: stdio only (for use with Claude Desktop / claude CLI).
+MCP transport: stdio by default, HTTP if `--http` is supplied.
 
 ---
 
@@ -218,12 +215,13 @@ Multi-stage build. The container expects pre-generated Doxygen XML as a bind
 mount — it does not run `doxygen` itself.
 
 ```
-Stage 1 (build): golang:1.24-alpine
-  - Build indexer and server binaries
+Stage 1 (build): golang:1.26-alpine
+  - Build the doxygen-mcp binary
 
 Stage 2 (runtime): alpine
-  - Copy binaries
-  - ENTRYPOINT: run indexer on mounted XML dir, then exec server (stdio)
+  - Copy binary
+  - ENTRYPOINT: run `doxygen-mcp index` on mounted XML dir,
+    then exec `doxygen-mcp serve "$@"` (default CMD: --http :9123)
 
 Stage 3 (test): built on top of stage 1
   - Run go test ./...
@@ -267,10 +265,10 @@ C source files
      ▼ doxygen (Doxyfile)
 Doxygen XML (xml/*.xml)
      │
-     ▼ cmd/indexer
+     ▼ doxygen-mcp index
 SQLite (FTS5 indexed)
      │
-     ▼ cmd/server (MCP stdio transport)
+     ▼ doxygen-mcp serve (MCP stdio or HTTP transport)
 MCP Client (claude CLI, Claude Desktop, etc.)
 ```
 
